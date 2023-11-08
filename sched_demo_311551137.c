@@ -5,6 +5,8 @@
 #include <pthread.h>
 
 pthread_barrier_t barrier;
+int num_threads = 0;
+float time_wait;
 
 typedef struct {
     pthread_t thread_id;
@@ -20,9 +22,16 @@ void *thread_func(void *arg)
     pthread_barrier_wait(&barrier);
 
     /* 2. Do the task */ 
+    time_t start_time;
+    time_t current_time;
     for (int i = 0; i < 3; i++) {
         printf("Thread %d is running\n", thread_info->thread_num);
         /* Busy for <time_wait> seconds */
+        time(&start_time);
+        do {
+            time(&current_time);
+        } while(current_time - start_time < time_wait);
+        
     }
     /* 3. Exit the function  */
     return 0;
@@ -31,11 +40,8 @@ void *thread_func(void *arg)
 int main(int argc, char *argv[]) {
 
     /* 1. Parse program arguments */
-
     int opt;
     char* endptr;
-    int num_threads = 0;
-    float time_wait;
     char *policies = NULL;
     int priorities = 0;
 
