@@ -13,17 +13,10 @@ int num_threads = 0;
 float time_wait;
 int target_cpu = 0;
 
-typedef struct {
-    pthread_t thread_id;
-    pthread_attr_t attr;
-    int thread_num;
-    struct sched_param param;
-} thread_info_t;
-
 void *thread_func(void *arg)
 {
     /* 1. Wait until all threads are ready */
-    thread_info_t* thread_info = (thread_info_t*)arg;
+    int* thread_num = (int*)arg;
     pthread_barrier_wait(&barrier);
 
     // Check the CPU affinity for this thread
@@ -36,7 +29,7 @@ void *thread_func(void *arg)
     time_t start_time;
     time_t current_time;
     for (int i = 0; i < 3; i++) {
-        printf("Thread %d is running\n", thread_info->thread_num);
+        printf("Thread %d is running\n", *thread_num);
         /* Busy for <time_wait> seconds */
         time(&start_time);
         do {
@@ -108,7 +101,7 @@ int main(int argc, char *argv[]) {
     assert(time_wait);
     assert(policy_arg);
     assert(priority_arg);
-
+    
     int *policies = parse_policies(policy_arg, num_threads);
     int *priorities = parse_priorities(priority_arg, num_threads);
 
@@ -118,7 +111,8 @@ int main(int argc, char *argv[]) {
     // }
 
     /* 2. Create <num_threads> worker threads */
-    thread_info_t thread_infos[num_threads];
+    pthread_t thread_ids[num_threads];
+    pthread_attr_t attrs[num_threads];
     assert(pthread_barrier_init(&barrier, NULL, num_threads) == 0);
     
     /* 3. Set CPU affinity */
@@ -129,23 +123,27 @@ int main(int argc, char *argv[]) {
     
     for (int i = 0; i < num_threads; i++) {
         /* 4. Set the attributes to each thread */
-        pthread_attr_init(&(thread_infos[i].attr));
-        thread_infos[i].param.sched_priority = priorities[i];
-        assert(pthread_attr_setschedpolicy(&(thread_infos[i].attr), policies[i]) == 0);
+        pthread_attr_init(&attrs[i]);
+        assert(pthread_attr_setinheritsched(&attrs[i], PTHREAD_EXPLICIT_SCHED) == 0);
         if (policies[i] == SCHED_FIFO) {
-            assert(pthread_attr_setschedparam(&(thread_infos[i].attr), &(thread_infos[i].param)) == 0);
+            assert(pthread_attr_setschedpolicy(&attrs[i], SCHED_FIFO) == 0);
+            struct sched_param param;
+            param.sched_priority = priorities[i];
+            assert(pthread_attr_setschedparam(&attrs[i], &param) == 0);
         }
     }
 
     /* 5. Start all threads at once */
     for (int i = 0; i < num_threads; i++) {
-        thread_infos[i].thread_num = i;
-        assert(pthread_create(&(thread_infos[i].thread_id), NULL, thread_func, &thread_infos[i]) == 0);
+        int *thread_num = (int*) malloc(sizeof(int));
+        *thread_num = i;
+        assert(pthread_create(&thread_ids[i], &attrs[i], thread_func, thread_num) == 0);
     }
 
     /* 6. Wait for all threads to finish  */
     for (int i = 0; i < num_threads; i++) {
-        assert(pthread_join(thread_infos[i].thread_id, NULL) == 0);
+        assert(pthread_join(thread_ids[i], NULL) == 0);
+        pthread_attr_destroy(&attrs[i]);
     }
 
     assert(pthread_barrier_destroy(&barrier) == 0);
