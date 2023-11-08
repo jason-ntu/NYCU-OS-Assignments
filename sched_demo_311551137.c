@@ -1,18 +1,23 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sched.h>
 
 pthread_barrier_t barrier;
 int num_threads = 0;
 float time_wait;
+int target_cpu = 0;
 
 typedef struct {
     pthread_t thread_id;
+    pthread_attr_t attr;
     int thread_num;
-    int sched_policy;
-    int sched_priority;
+    struct sched_param param;
 } thread_info_t;
 
 void *thread_func(void *arg)
@@ -20,6 +25,12 @@ void *thread_func(void *arg)
     /* 1. Wait until all threads are ready */
     thread_info_t* thread_info = (thread_info_t*)arg;
     pthread_barrier_wait(&barrier);
+
+    // Check the CPU affinity for this thread
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset); // Initialize the CPU set
+    sched_getaffinity(0, sizeof(cpuset), &cpuset);
+    assert(CPU_ISSET(target_cpu, &cpuset));
 
     /* 2. Do the task */ 
     time_t start_time;
@@ -30,11 +41,40 @@ void *thread_func(void *arg)
         time(&start_time);
         do {
             time(&current_time);
-        } while(current_time - start_time < time_wait);
-        
+        } while(current_time - start_time < time_wait);   
     }
     /* 3. Exit the function  */
     return 0;
+}
+
+int *parse_policies(char *str, int len) {
+    int *result = (int *)malloc(len * sizeof(int));
+    char *token = strtok(str, ",");
+
+    for (int i = 0; token != NULL && i < len; i++) {
+        if (strcmp(token, "NORMAL") == 0) {
+            result[i] = SCHED_OTHER;
+        } else if (strcmp(token, "FIFO") == 0) {
+            result[i] = SCHED_FIFO;
+        } else {
+            fprintf(stderr, "Invalid scheduling policy: %s\n", token);
+            break;
+        }
+        token = strtok(NULL, ",");
+    }
+    return result;
+}
+
+int *parse_priorities(char *str, int len) {
+    int *result = (int *)malloc(len * sizeof(int));
+    char *token = strtok(str, ",");
+
+    for (int i = 0; token != NULL && i < len; i++) {
+        result[i] = atoi(token);
+        token = strtok(NULL, ",");
+    }
+
+    return result;
 }
 
 int main(int argc, char *argv[]) {
@@ -42,8 +82,8 @@ int main(int argc, char *argv[]) {
     /* 1. Parse program arguments */
     int opt;
     char* endptr;
-    char *policies = NULL;
-    int priorities = 0;
+    char *policy_arg = NULL;
+    char *priority_arg = NULL;
 
     while ((opt = getopt(argc, argv, "n:t:s:p:")) != -1) {
         switch (opt) {
@@ -54,10 +94,10 @@ int main(int argc, char *argv[]) {
                 time_wait = strtof(optarg, &endptr);
                 break;
             case 's':
-                policies = optarg;
+                policy_arg = optarg;
                 break;
             case 'p':
-                priorities = atoi(optarg);
+                priority_arg = optarg;
                 break;
             default:
                 break;
@@ -66,31 +106,49 @@ int main(int argc, char *argv[]) {
 
     assert(num_threads);
     assert(time_wait);
-    assert(policies);
-    assert(priorities);
+    assert(policy_arg);
+    assert(priority_arg);
+
+    int *policies = parse_policies(policy_arg, num_threads);
+    int *priorities = parse_priorities(priority_arg, num_threads);
+
+    // for (int i = 0; i < num_threads; i++) {
+    //     printf("policies[%d] = %i\n", i, policies[i]);
+    //     printf("priorities[%d] = %d\n", i, priorities[i]);
+    // }
 
     /* 2. Create <num_threads> worker threads */
     thread_info_t thread_infos[num_threads];
-    pthread_barrier_init(&barrier, NULL, num_threads);
+    assert(pthread_barrier_init(&barrier, NULL, num_threads) == 0);
     
     /* 3. Set CPU affinity */
-
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(target_cpu, &cpuset);
+    assert(sched_setaffinity(getpid(), sizeof(cpuset), &cpuset) == 0);
+    
     for (int i = 0; i < num_threads; i++) {
         /* 4. Set the attributes to each thread */
+        pthread_attr_init(&(thread_infos[i].attr));
+        thread_infos[i].param.sched_priority = priorities[i];
+        assert(pthread_attr_setschedpolicy(&(thread_infos[i].attr), policies[i]) == 0);
+        if (policies[i] == SCHED_FIFO) {
+            assert(pthread_attr_setschedparam(&(thread_infos[i].attr), &(thread_infos[i].param)) == 0);
+        }
     }
 
     /* 5. Start all threads at once */
     for (int i = 0; i < num_threads; i++) {
         thread_infos[i].thread_num = i;
-        pthread_create(&(thread_infos[i].thread_id), NULL, thread_func, &thread_infos[i]);
+        assert(pthread_create(&(thread_infos[i].thread_id), NULL, thread_func, &thread_infos[i]) == 0);
     }
 
     /* 6. Wait for all threads to finish  */
     for (int i = 0; i < num_threads; i++) {
-        pthread_join(thread_infos[i].thread_id, NULL);
+        assert(pthread_join(thread_infos[i].thread_id, NULL) == 0);
     }
 
-    pthread_barrier_destroy(&barrier);
-
+    assert(pthread_barrier_destroy(&barrier) == 0);
+    
     return 0;
 }
