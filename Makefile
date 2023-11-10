@@ -17,5 +17,9 @@ compile:
 	@echo "\nCase ${@}:"
 	./$(PROG) -n 3 -t 1.0 -s NORMAL,FIFO,FIFO -p -1,10,30
 
+4: compile
+	@echo "\nCase ${@}:"
+	./$(PROG) -n 4 -t 0.5 -s NORMAL,FIFO,NORMAL,FIFO -p -1,10,-1,30
+
 test: compile
 	sudo ./sched_test.sh ./sched_demo ./$(PROG)

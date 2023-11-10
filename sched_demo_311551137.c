@@ -17,13 +17,34 @@ void *thread_func(void *arg)
 {
     /* 1. Wait until all threads are ready */
     int* thread_num = (int*)arg;
-    pthread_barrier_wait(&barrier);
+    int result = pthread_barrier_wait(&barrier);
+    assert(result == 0 || result == PTHREAD_BARRIER_SERIAL_THREAD);
 
     // Check the CPU affinity for this thread
     cpu_set_t cpuset;
-    CPU_ZERO(&cpuset); // Initialize the CPU set
+    CPU_ZERO(&cpuset);
     sched_getaffinity(0, sizeof(cpuset), &cpuset);
     assert(CPU_ISSET(target_cpu, &cpuset));
+
+    // Check the scheduling policy for this thread
+    // int policy;
+    // struct sched_param param;
+
+    // pthread_getschedparam(pthread_self(), &policy, &param);
+
+    // switch (policy) {
+    //     case SCHED_FIFO:
+    //         printf("Thread %d is using the FIFO scheduling policy\n", *thread_num);
+    //         break;
+    //     case SCHED_RR:
+    //         printf("Thread %d is using the Round Robin scheduling policy\n", *thread_num);
+    //         break;
+    //     case SCHED_OTHER:
+    //         printf("Thread %d is using another scheduling policy\n", *thread_num);
+    //         break;
+    //     default:
+    //         fprintf(stderr, "Error: Unknown scheduling policy for thread %d\n", *thread_num);
+    // }
 
     /* 2. Do the task */ 
     time_t start_time;
@@ -49,6 +70,8 @@ int *parse_policies(char *str, int len) {
             result[i] = SCHED_OTHER;
         } else if (strcmp(token, "FIFO") == 0) {
             result[i] = SCHED_FIFO;
+        } else if (strcmp(token, "RR") == 0) {
+            result[i] = SCHED_RR;
         } else {
             fprintf(stderr, "Invalid scheduling policy: %s\n", token);
             break;
@@ -113,40 +136,62 @@ int main(int argc, char *argv[]) {
     /* 2. Create <num_threads> worker threads */
     pthread_t thread_ids[num_threads];
     pthread_attr_t attrs[num_threads];
-    assert(pthread_barrier_init(&barrier, NULL, num_threads) == 0);
+    struct sched_param param[num_threads];
+    int thread_nums[num_threads];
+    assert(pthread_barrier_init(&barrier, NULL, num_threads+1) == 0);
     
     /* 3. Set CPU affinity */
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(target_cpu, &cpuset);
     assert(sched_setaffinity(getpid(), sizeof(cpuset), &cpuset) == 0);
-    
+
     for (int i = 0; i < num_threads; i++) {
         /* 4. Set the attributes to each thread */
-        pthread_attr_init(&attrs[i]);
+        thread_nums[i] = i;
+        assert(pthread_attr_init(&attrs[i]) == 0);
         assert(pthread_attr_setinheritsched(&attrs[i], PTHREAD_EXPLICIT_SCHED) == 0);
-        if (policies[i] == SCHED_FIFO) {
-            assert(pthread_attr_setschedpolicy(&attrs[i], SCHED_FIFO) == 0);
-            struct sched_param param;
-            param.sched_priority = priorities[i];
-            assert(pthread_attr_setschedparam(&attrs[i], &param) == 0);
+        assert(pthread_attr_setschedpolicy(&attrs[i], policies[i]) == 0);
+        if (policies[i] != SCHED_OTHER) {
+            param[i].sched_priority = priorities[i];
+            assert(pthread_attr_setschedparam(&attrs[i], &param[i]) == 0);
         }
     }
 
+    // for (int i = 0; i < num_threads; i++) {
+    //     int retrieved_policy;
+    //     pthread_attr_getschedpolicy(&attrs[i], &retrieved_policy);
+
+    //     switch (retrieved_policy) {
+    //         case SCHED_FIFO:
+    //             printf("Thread %d is using the FIFO scheduling policy\n", thread_nums[i]);
+    //             break;
+    //         case SCHED_RR:
+    //             printf("Thread %d is using the Round Robin scheduling policy\n", thread_nums[i]);
+    //             break;
+    //         case SCHED_OTHER:
+    //             printf("Thread %d is using another scheduling policy\n", thread_nums[i]);
+    //             break;
+    //         default:
+    //             fprintf(stderr, "Error: Unknown scheduling policy for thread %d\n", thread_nums[i]);
+    //     }
+    // }
+
     /* 5. Start all threads at once */
+    // printf("Start all threads at once\n");
     for (int i = 0; i < num_threads; i++) {
-        int *thread_num = (int*) malloc(sizeof(int));
-        *thread_num = i;
-        assert(pthread_create(&thread_ids[i], &attrs[i], thread_func, thread_num) == 0);
+        assert(pthread_create(&thread_ids[i], &attrs[i], thread_func, &thread_nums[i]) == 0);
     }
+    int result = pthread_barrier_wait(&barrier);
+    assert(result == 0 || result == PTHREAD_BARRIER_SERIAL_THREAD);
+    assert(pthread_barrier_destroy(&barrier) == 0);
 
     /* 6. Wait for all threads to finish  */
     for (int i = 0; i < num_threads; i++) {
         assert(pthread_join(thread_ids[i], NULL) == 0);
-        pthread_attr_destroy(&attrs[i]);
+        assert(pthread_attr_destroy(&attrs[i]) == 0);
     }
 
-    assert(pthread_barrier_destroy(&barrier) == 0);
-    
+
     return 0;
 }
