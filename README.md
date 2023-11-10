@@ -16,6 +16,4 @@
 
     ![Alt text](expected_result.png)
 
-- You can also running the commands `make` to observe the scheduling behaviors for the given cases. However, due to some environment issue, the FIFO policy will fail.
-
-    ![Alt text](image.png)
+- You can also running the commands `make` to observe the scheduling behaviors for the given cases.
