@@ -13,7 +13,8 @@ RESET="$(tput sgr0)"
 # You can add your own testcases here
 testcases=("-n 1 -t 0.5 -s NORMAL -p -1"
            "-n 2 -t 0.5 -s FIFO,FIFO -p 10,20"
-           "-n 3 -t 1.0 -s NORMAL,FIFO,FIFO -p -1,10,30")
+           "-n 3 -t 1.0 -s NORMAL,FIFO,FIFO -p -1,10,30"
+           "-n 4 -t 0.5 -s NORMAL,FIFO,NORMAL,FIFO -p -1,10,-1,30")
 
 
 pre_run() {
